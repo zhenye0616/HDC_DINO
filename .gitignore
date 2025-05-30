@@ -1,5 +1,5 @@
 .nfs*
-*.ipynb
+#*.ipynb
 *.pyc
 .dumbo.json
 .DS_Store
@@ -24,3 +24,4 @@ vis/
 model_zoo/
 model_zoo_old/
 scripts/
+hd_ckpt*/

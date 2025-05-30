@@ -20,6 +20,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torchvision.ops.boxes import nms
+from onlinehd.onlinehd import OnlineHD as HD
+from Demo.dino_hd import HD_init
 
 from util import box_ops
 from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
@@ -35,6 +37,9 @@ from .utils import sigmoid_focal_loss, MLP
 
 from ..registry import MODULE_BUILD_FUNCS
 from .dn_components import prepare_for_cdn,dn_post_process
+
+
+
 class DINO(nn.Module):
     """ This is the Cross-Attention Detector module that performs object detection """
     def __init__(self, backbone, transformer, num_classes, num_queries, 
@@ -129,12 +134,16 @@ class DINO(nn.Module):
         self.dec_pred_class_embed_share = dec_pred_class_embed_share
         self.dec_pred_bbox_embed_share = dec_pred_bbox_embed_share
         # prepare class & box embed
-        _class_embed = nn.Linear(hidden_dim, num_classes)
+        #_class_embed = nn.Linear(hidden_dim, num_classes)
+        #_class_embed = MLP(hidden_dim, hidden_dim, num_classes, num_layers=3)
+        _class_embed = HD(num_classes, hidden_dim, dim = 100).to('cuda')
         _bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         # init the two embed layers
-        prior_prob = 0.01
-        bias_value = -math.log((1 - prior_prob) / prior_prob)
-        _class_embed.bias.data = torch.ones(self.num_classes) * bias_value
+        #prior_prob = 0.01
+        #bias_value = -math.log((1 - prior_prob) / prior_prob)
+        HD_init(_class_embed)
+        #nn.init.constant_(_class_embed.layers[-1].bias, bias_value) #init mlp classifier
+        #_class_embed.bias.data = torch.ones(self.num_classes) * bias_value
         nn.init.constant_(_bbox_embed.layers[-1].weight.data, 0)
         nn.init.constant_(_bbox_embed.layers[-1].bias.data, 0)
 
@@ -484,6 +493,7 @@ class SetCriterion(nn.Module):
         outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs'}
         device=next(iter(outputs.values())).device
         indices = self.matcher(outputs_without_aux, targets)
+        #print("Matcher indices:", indices)
 
         if return_indices:
             indices0_copy = indices

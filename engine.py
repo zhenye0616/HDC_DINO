@@ -15,13 +15,16 @@ import torch
 import util.misc as utils
 from datasets.coco_eval import CocoEvaluator
 from datasets.panoptic_eval import PanopticEvaluator
+from torchvision.ops import  box_iou
+
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0, 
                     wo_class_error=False, lr_scheduler=None, args=None, logger=None, ema_m=None):
-    scaler = torch.cuda.amp.GradScaler(enabled=args.amp)
+    scaler = torch.cuda.amp.GradScaler(enabled=getattr(args, "amp", False))
+    #scaler = torch.cuda.amp.GradScaler(enabled=args.amp)
 
     try:
         need_tgt_for_training = args.use_dn
@@ -42,8 +45,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-
-        with torch.cuda.amp.autocast(enabled=args.amp):
+        #targets = preprocess_targets(targets, device)
+        with torch.cuda.amp.autocast(enabled=getattr(args, "amp", False)):
+        #with torch.cuda.amp.autocast(enabled=args.amp):
+            #import pdb;pdb.set_trace()
             if need_tgt_for_training:
                 outputs = model(samples, targets)
             else:
@@ -51,8 +56,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         
             loss_dict = criterion(outputs, targets)
             weight_dict = criterion.weight_dict
-
+            # Assuming criterion.weight_dict is your original weight dictionary:
+            allowed_keys = ["loss_ce", "loss_bbox", "loss_giou"]
+            # Set the weights of all losses not matching the allowed keys to zero
+            for key in list(criterion.weight_dict.keys()):
+                if key not in allowed_keys:
+                    weight_dict[key] = 0.0
+            #only use regression loss and classification loss 
             losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+            #import pdb;pdb.set_trace()
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
@@ -128,7 +140,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
     model.eval()
     criterion.eval()
-
+    
     metric_logger = utils.MetricLogger(delimiter="  ")
     if not wo_class_error:
         metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
@@ -157,10 +169,10 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     output_state_dict = {} # for debug only
     for samples, targets in metric_logger.log_every(data_loader, 10, header, logger=logger):
         samples = samples.to(device)
-
-        # targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-        targets = [{k: to_device(v, device) for k, v in t.items()} for t in targets]
-
+        raw_targets = targets
+        #targets = [{k: to_device(v, device) for k, v in t.items()} for t in targets]
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        #targets = preprocess_targets(targets, device)
         with torch.cuda.amp.autocast(enabled=args.amp):
             if need_tgt_for_training:
                 outputs = model(samples, targets)
@@ -182,13 +194,21 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                              **loss_dict_reduced_unscaled)
         if 'class_error' in loss_dict_reduced:
             metric_logger.update(class_error=loss_dict_reduced['class_error'])
-
+        for raw_t, t in zip(raw_targets, targets):
+            if "orig_size" not in t and "size" in raw_t:
+                t["orig_size"] = torch.tensor(raw_t["size"], device=device)
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors['bbox'](outputs, orig_target_sizes)
         # [scores: [100], labels: [100], boxes: [100, 4]] x B
         if 'segm' in postprocessors.keys():
             target_sizes = torch.stack([t["size"] for t in targets], dim=0)
             results = postprocessors['segm'](results, outputs, orig_target_sizes, target_sizes)
+        for raw_t, t in zip(raw_targets, targets):
+            if "image_id" not in t and "image_id" in raw_t:
+                # wrap into a tensor so .item() works downstream
+                img_id = raw_t["image_id"]
+                t["image_id"] = (img_id if isinstance(img_id, torch.Tensor)
+                         else torch.tensor(img_id, device=device))
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}
 
         if coco_evaluator is not None:
@@ -222,15 +242,26 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
                 tgt: dict.
 
                 """
+                gt_norm   = tgt['boxes']           # [G,4] in cx,cy,w,h ∈ [0,1]
+                H, W      = tgt['orig_size']       # [H, W] in pixels
+                scale     = torch.tensor([W, H, W, H], device=gt_norm.device)
+                gt_cxcywh = gt_norm * scale        # now cx,cy,w,h in pixels
+                cx, cy, w, h = gt_cxcywh.unbind(1)
+                x1 = cx - 0.5 * w
+                y1 = cy - 0.5 * h
+                x2 = cx + 0.5 * w
+                y2 = cy + 0.5 * h
+                gt_bbox = torch.stack([x1, y1, x2, y2], dim=1) 
                 # compare gt and res (after postprocess)
-                gt_bbox = tgt['boxes']
+                #gt_bbox = tgt['boxes']
                 gt_label = tgt['labels']
                 gt_info = torch.cat((gt_bbox, gt_label.unsqueeze(-1)), 1)
                 
-                # img_h, img_w = tgt['orig_size'].unbind()
-                # scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=0)
-                # _res_bbox = res['boxes'] / scale_fct
-                _res_bbox = outbbox
+                #img_h, img_w = tgt['orig_size'].unbind()
+                #scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=0)
+                _res_bbox = res['boxes']
+                #import pdb;pdb.set_trace()
+                #_res_bbox = outbbox
                 _res_prob = res['scores']
                 _res_label = res['labels']
                 res_info = torch.cat((_res_bbox, _res_prob.unsqueeze(-1), _res_label.unsqueeze(-1)), 1)
@@ -249,7 +280,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             # if random.random() > 0.7:
             #     print("Now let's break")
             #     break
-
+        #import pdb;pdb.set_trace()
         _cnt += 1
         if args.debug:
             if _cnt % 15 == 0:
@@ -291,7 +322,6 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
         stats['PQ_all'] = panoptic_res["All"]
         stats['PQ_th'] = panoptic_res["Things"]
         stats['PQ_st'] = panoptic_res["Stuff"]
-
 
 
     return stats, coco_evaluator
@@ -369,3 +399,36 @@ def test(model, criterion, postprocessors, data_loader, base_ds, device, output_
             json.dump(final_res, f)        
 
     return final_res
+
+
+def preprocess_targets(targets, device):
+    """
+    Given a list of targets (one per image), where each target is a list of dictionaries
+    (one dictionary per object), this function converts each list into a single dictionary.
+    
+    It creates:
+      - "boxes": a tensor of shape [num_objects, 4] from each object's "bbox" key.
+      - "labels": a tensor of shape [num_objects] from each object's "category_id" key.
+    
+    Args:
+        targets (list): Each element is a list of dictionaries for one image.
+        device (torch.device): The device to move the tensors to.
+        
+    Returns:
+        list of dict: Each dict has keys "boxes" and "labels" with corresponding tensors.
+    """
+    processed = []
+    for t in targets:
+        # t is a list of dictionaries
+        boxes = []
+        labels = []
+        for obj in t:
+            if "bbox" in obj:
+                boxes.append(obj["bbox"])
+            if "category_id" in obj:
+                labels.append(obj["category_id"])
+        # Create tensors; if no objects, create empty tensors.
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32, device=device) if boxes else torch.empty((0, 4), dtype=torch.float32, device=device)
+        labels_tensor = torch.tensor(labels, dtype=torch.int64, device=device) if labels else torch.empty((0,), dtype=torch.int64, device=device)
+        processed.append({"boxes": boxes_tensor, "labels": labels_tensor})
+    return processed

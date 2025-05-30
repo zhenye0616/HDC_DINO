@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import random
 import os
+import numpy as np
 
 import torch
 import torch.utils.data
@@ -321,11 +322,18 @@ dataset_hook_register = {
 
 
 class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self, img_folder, ann_file, transforms, return_masks, aux_target_hacks=None):
+    def __init__(self, img_folder, ann_file, transforms, return_masks, aux_target_hacks=None, sample_ratio = 1.0):
         super(CocoDetection, self).__init__(img_folder, ann_file)
         self._transforms = transforms
         self.prepare = ConvertCocoPolysToMask(return_masks)
         self.aux_target_hacks = aux_target_hacks
+
+        # ✅ Subsample image IDs if needed
+        if sample_ratio < 1.0:
+            np.random.seed(42)
+            total_ids = self.ids
+            sample_size = int(len(total_ids) * sample_ratio)
+            self.ids = np.random.choice(total_ids, sample_size, replace=False).tolist()
 
     def change_hack_attr(self, hackclassname, attrkv_dict):
         target_class = dataset_hook_register[hackclassname]
@@ -636,6 +644,7 @@ def build(image_set, args):
             transforms=make_coco_transforms(image_set, fix_size=args.fix_size, strong_aug=strong_aug, args=args), 
             return_masks=args.masks,
             aux_target_hacks=aux_target_hacks_list,
+            sample_ratio=getattr(args, "sample_ratio", 1.0) 
         )
 
     return dataset
