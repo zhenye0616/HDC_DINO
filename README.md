@@ -1,8 +1,12 @@
-Fintuning code is under /home/biaslab/Zhen/HDC_DINO/Demo
-hd Fintuned model ckpt /home/biaslab/Zhen/HDC_DINO/Demo/hd_ckpt (multiple folders with different dim)
-run dino_video to generate visual results
+use this command to create the env
+-conda env create -f environment.yml
 
-whenever you want to change the classification head or load checkpoint make sure to go to dino.py
+Pretrained checkpoint is in /checkpoint
+Fintuning code is under /Demo
+hd Fintuned model ckpt /Demo/hd_ckpt (multiple folders with different dim)
+run dino_video.ipynb to generate visual results
+
+whenever you want to change the classification head or load checkpoint make sure to go to dino.py or else there will be mismatch between checkpoint weights and the model.
 
 ""      _class_embed = nn.Linear(hidden_dim, num_classes) (linear)
         #_class_embed = MLP(hidden_dim, hidden_dim, num_classes, num_layers=3) (mlp)
