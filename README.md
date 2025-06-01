@@ -4,7 +4,7 @@ use this command to create the env
 After that activate the env and compile the CUDA operators
 -cd models/dino/ops
 -python setup.py build install
-# unit test (should see all checking is True)
+-# unit test (should see all checking is True)
 -python test.py
 -cd ../../..
 
