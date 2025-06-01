@@ -1,10 +1,16 @@
 use this command to create the env
 -conda env create -f environment.yml
 
+After that activate the env and compile the CUDA operators
+-cd models/dino/ops
+-python setup.py build install
+# unit test (should see all checking is True)
+-python test.py
+-cd ../../..
+
+
 Pretrained checkpoint is in /checkpoint
-Fintuning code is under /Demo
-hd Fintuned model ckpt /Demo/hd_ckpt (multiple folders with different dim)
-run dino_video.ipynb to generate visual results
+Fintuning code with hdc head is in dino_hd.py
 
 whenever you want to change the classification head or load checkpoint make sure to go to dino.py or else there will be mismatch between checkpoint weights and the model.
 
@@ -20,3 +26,5 @@ whenever you want to change the classification head or load checkpoint make sure
         _class_embed.bias.data = torch.ones(self.num_classes) * bias_value (linear)
         nn.init.constant_(_bbox_embed.layers[-1].weight.data, 0)
         nn.init.constant_(_bbox_embed.layers[-1].bias.data, 0)""
+
+run dino_video.ipynb to generate visual results

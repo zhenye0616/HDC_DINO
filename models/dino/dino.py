@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from torch import nn
 from torchvision.ops.boxes import nms
 from onlinehd.onlinehd import OnlineHD as HD
-from Demo.dino_hd import HD_init
+from dino_hd import HD_init
 
 from util import box_ops
 from util.misc import (NestedTensor, nested_tensor_from_tensor_list,

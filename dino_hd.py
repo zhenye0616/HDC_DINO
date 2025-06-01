@@ -1,5 +1,5 @@
 import os, sys
-sys.path.append('/home/biaslab/Zhen/HDC_DINO')
+#sys.path.append('/home/biaslab/Zhen/HDC_DINO')
 import argparse
 import pickle
 from tqdm import tqdm
