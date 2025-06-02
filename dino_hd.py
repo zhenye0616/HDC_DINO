@@ -9,7 +9,7 @@ import json
 import time
 from util import misc
 import util.misc as utils
-from Demo.finetune import check_activation_stats, DINOBackbone
+from finetune import check_activation_stats, DINOBackbone
 import math
 import torch.nn as nn
 from util import misc
@@ -223,7 +223,9 @@ def HD_init(hd_model, prior_prob=0.01):
     
     # Compute the bias value so that the initial logits correspond to a low probability.
     bias_value = -math.log((1 - prior_prob) / prior_prob)
-    hd_model.model.bias.data = torch.ones(hd_model.classes) * bias_value
+    if hd_model.model.bias is not None:
+        hd_model.model.bias.data = torch.ones(hd_model.classes) * bias_value
+    #hd_model.model.bias.data = torch.ones(hd_model.classes) * bias_value
     print('HD_init')
 
 
